@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	opv1 "github.com/openshift/api/operator/v1"
 	"github.com/openshift/library-go/pkg/config/client"
 	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/rest"
@@ -20,8 +21,8 @@ import (
 	cfginformers "github.com/openshift/client-go/config/informers/externalversions"
 	opclient "github.com/openshift/client-go/operator/clientset/versioned"
 	opinformers "github.com/openshift/client-go/operator/informers/externalversions"
-	"github.com/openshift/cluster-storage-operator/pkg/operatorclient"
 	"github.com/openshift/library-go/pkg/controller/controllercmd"
+	"github.com/openshift/library-go/pkg/operator/genericoperatorclient"
 	"github.com/openshift/library-go/pkg/operator/v1helpers"
 	prominformer "github.com/prometheus-operator/prometheus-operator/pkg/client/informers/externalversions"
 	promclient "github.com/prometheus-operator/prometheus-operator/pkg/client/versioned"
@@ -29,7 +30,9 @@ import (
 
 type Clients struct {
 	// Client for CSO's CR
-	OperatorClient *operatorclient.OperatorClient
+	OperatorClient         v1helpers.OperatorClientWithFinalizers
+	OperatorClientInformer dynamicinformer.DynamicSharedInformerFactory
+
 	// Kubernetes API client
 	KubeClient kubernetes.Interface
 	// Kubernetes API informers, per namespace
@@ -127,11 +130,11 @@ func NewClients(controllerConfig *controllercmd.ControllerContext, resync time.D
 	}
 	c.MonitoringInformer = prominformer.NewSharedInformerFactory(c.MonitoringClient, resync)
 
-	c.OperatorClient = &operatorclient.OperatorClient{
-		Informers: c.OperatorInformers,
-		Client:    c.OperatorClientSet,
+	gvr := opv1.SchemeGroupVersion.WithResource("storages")
+	c.OperatorClient, c.OperatorClientInformer, err = genericoperatorclient.NewClusterScopedOperatorClient(controllerConfig.ProtoKubeConfig, gvr)
+	if err != nil {
+		return nil, err
 	}
-
 	dc, err := discovery.NewDiscoveryClientForConfig(controllerConfig.KubeConfig)
 	if err != nil {
 		return nil, err
@@ -231,9 +234,10 @@ func NewHypershiftGuestClients(
 	}
 	c.MonitoringInformer = prominformer.NewSharedInformerFactory(c.MonitoringClient, resync)
 
-	c.OperatorClient = &operatorclient.OperatorClient{
-		Informers: c.OperatorInformers,
-		Client:    c.OperatorClientSet,
+	gvr := opv1.SchemeGroupVersion.WithResource("storages")
+	c.OperatorClient, c.OperatorClientInformer, err = genericoperatorclient.NewClusterScopedOperatorClient(kubeRestConfig, gvr)
+	if err != nil {
+		return nil, err
 	}
 
 	dc, err := discovery.NewDiscoveryClientForConfig(kubeRestConfig)
@@ -255,6 +259,7 @@ func StartInformers(clients *Clients, stopCh <-chan struct{}) {
 		clients.ExtensionInformer,
 		clients.MonitoringInformer,
 		clients.DynamicInformer,
+		clients.OperatorClientInformer,
 	} {
 		informer.Start(stopCh)
 	}
@@ -270,6 +275,7 @@ func StartGuestInformers(clients *Clients, stopCh <-chan struct{}) {
 		clients.ExtensionInformer,
 		clients.MonitoringInformer,
 		clients.DynamicInformer,
+		clients.OperatorClientInformer,
 	} {
 		informer.Start(stopCh)
 	}

@@ -14,7 +14,6 @@ import (
 	"github.com/openshift/library-go/pkg/operator/v1helpers"
 	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	errutil "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/kubernetes"
 	v1 "k8s.io/client-go/listers/storage/v1"
 	"k8s.io/klog/v2"
@@ -49,16 +48,20 @@ func NewController(
 	clients *csoclients.Clients,
 	eventRecorder events.Recorder) factory.Controller {
 	c := &Controller{
-		operatorClient:     clients.OperatorClient,
-		kubeClient:         clients.KubeClient,
-		infraLister:        clients.ConfigInformers.Config().V1().Infrastructures().Lister(),
-		storageClassLister: clients.KubeInformers.InformersFor("").Storage().V1().StorageClasses().Lister(),
-		eventRecorder:      eventRecorder,
+		operatorClient: clients.OperatorClient,
+		kubeClient:     clients.KubeClient,
+		// add lister for ConfigMaps
+		configMapLister: clients.KubeInformers.InformersFor("openshift-config").Core().V1().ConfigMaps().Lister(),
+		//infraLister:        clients.ConfigInformers.Config().V1().Infrastructures().Lister(),
+		//storageClassLister: clients.KubeInformers.InformersFor("").Storage().V1().StorageClasses().Lister(),
+		eventRecorder: eventRecorder,
 	}
 	return factory.New().WithSync(c.sync).WithSyncDegradedOnError(clients.OperatorClient).WithInformers(
 		clients.OperatorClient.Informer(),
-		clients.ConfigInformers.Config().V1().Infrastructures().Informer(),
-		clients.KubeInformers.InformersFor("").Storage().V1().StorageClasses().Informer(),
+		//clients.ConfigInformers.Config().V1().Infrastructures().Informer(),
+		//clients.KubeInformers.InformersFor("").Storage().V1().StorageClasses().Informer(),
+		// sledovat ConfigMapu v openshift-config namespace
+		clients.KubeInformers.InformersFor("openshift-config").Core().V1().ConfigMaps().Informer(),
 	).ToController("DefaultStorageClassController", eventRecorder)
 }
 
@@ -73,17 +76,25 @@ func (c *Controller) sync(ctx context.Context, syncCtx factory.SyncContext) erro
 	if opSpec.ManagementState != operatorapi.Managed {
 		return nil
 	}
-
-	availableCnd := operatorapi.OperatorCondition{
-		Type:   conditionsPrefix + operatorapi.OperatorStatusTypeAvailable,
-		Status: operatorapi.ConditionTrue,
+	/*
+		availableCnd := operatorapi.OperatorCondition{
+			Type:   conditionsPrefix + operatorapi.OperatorStatusTypeAvailable,
+			Status: operatorapi.ConditionTrue,
+		}
+		progressingCnd := operatorapi.OperatorCondition{
+			Type:   conditionsPrefix + operatorapi.OperatorStatusTypeProgressing,
+			Status: operatorapi.ConditionFalse,
+		}
+	*/
+	// get ConfigMap from the informer
+	configMap, err := c.configMapLister.ConfigMaps("openshift-config").Get("selinux-conflicts")
+	if err != nil {
+		return err
 	}
-	progressingCnd := operatorapi.OperatorCondition{
-		Type:   conditionsPrefix + operatorapi.OperatorStatusTypeProgressing,
-		Status: operatorapi.ConditionFalse,
-	}
+	// check content the config map content
+	// set Upgradeable condition
 
-	syncErr := c.syncStorageClass(ctx)
+	/*syncErr := c.syncStorageClass(ctx)
 	if syncErr != nil {
 		if syncErr == unsupportedPlatformError {
 			// Set Disabled condition - there is nothing to do
@@ -153,6 +164,7 @@ func (c *Controller) sync(ctx context.Context, syncCtx factory.SyncContext) erro
 	}
 
 	return syncErr
+	*/
 }
 
 func (c *Controller) syncStorageClass(ctx context.Context) error {

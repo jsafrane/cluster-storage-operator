@@ -207,6 +207,10 @@ func (ssr *StandaloneStarter) StartOperator(ctx context.Context) error {
 		ssr.eventRecorder)
 	ssr.controllers = append(ssr.controllers, vsphereProblemDetector)
 
+	// Vyrobit SELinuxController
+	selinuxController := selinux.NewSELinuxController(...)
+	ssr.controllers = append(ssr.controllers, selinuxController)
+
 	klog.Info("Starting the Informers.")
 
 	csoclients.StartInformers(ssr.commonClients, ctx.Done())
